@@ -1,0 +1,90 @@
+on: [push, pull_request]
+
+name: Continuous integration
+
+jobs:
+  build:
+    name: Test ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Syntax:
+        # https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#jobsjob_idstrategymatrix
+        # 
+        # Operating systems available:
+        # https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+        os:
+          - ubuntu-24.04
+          - macos-14
+
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Check out source code
+      uses: actions/checkout@v4
+
+    - name: "Install build dependencies"
+      if: matrix.os == 'ubuntu-24.04'
+      # The default packages available on Ubuntu 24.04:
+      # https://github.com/actions/runner-images/blob/650fb260cb8ba21ccccaff47470d3f43c94fbb3e/images/ubuntu/Ubuntu2404-Readme.md
+      # 
+      # Ninja is not available in the default GitHub runner:
+      # https://github.com/actions/runner-images/issues/514
+      #
+      # We also don't bother installing libre2-dev on Ubuntu, because
+      # the Ubuntu package doesn't include FindRe2.cmake (unlike
+      # e.g. Fedora).
+      run: sudo apt-get install -y ninja-build libcurl4-openssl-dev libedit-dev
+
+    - name: "Install build dependencies"
+      if: matrix.os == 'macos-14'
+      run: brew install ninja
+
+    - name: "libdispatch: Download"
+      if: matrix.os == 'ubuntu-24.04'
+      # Use a recent tag to pick up https://github.com/swiftlang/swift-corelibs-libdispatch/pull/840
+      run: wget https://github.com/swiftlang/swift-corelibs-libdispatch/archive/refs/tags/swift-DEVELOPMENT-SNAPSHOT-2025-02-06-a.tar.gz
+
+    - name: "libdispatch: Decompress"
+      if: matrix.os == 'ubuntu-24.04'
+      run: tar -xzf swift-DEVELOPMENT-SNAPSHOT-2025-02-06-a.tar.gz && mv swift-corelibs-libdispatch-swift-DEVELOPMENT-SNAPSHOT-2025-02-06-a/ libdispatch && rm swift-DEVELOPMENT-SNAPSHOT-2025-02-06-a.tar.gz
+
+    # https://github.com/swiftlang/swift-corelibs-libdispatch/blob/main/INSTALL.md#building-and-installing-for-linux
+    - name: "libdispatch: CMake"
+      if: matrix.os == 'ubuntu-24.04'
+      run: cd libdispatch && cmake -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ .
+
+    - name: "libdispatch: Build"
+      if: matrix.os == 'ubuntu-24.04'
+      run: cd libdispatch && ninja
+
+    # https://github.com/swiftlang/llvm-project/releases/tag/swift-6.0.3-RELEASE
+    - name: "LLVM: Download"
+      run: wget https://github.com/swiftlang/llvm-project/archive/refs/tags/swift-6.0.3-RELEASE.tar.gz
+
+    - name: "LLVM: Decompress"
+      run: tar -xzf swift-6.0.3-RELEASE.tar.gz && mv llvm-project-swift-6.0.3-RELEASE llvm && rm swift-6.0.3-RELEASE.tar.gz
+
+    - name: "LLVM: CMake"
+      # Configure a minimal LLVM build for our needs: Only clang, only one architecture.
+      # https://llvm.org/docs/CMake.html
+      run: cd llvm && mkdir build && cmake -S llvm -B build -G Ninja -DLLVM_ENABLE_PROJECTS='clang' -DCMAKE_BUILD_TYPE=MinSizeRel -DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_PARALLEL_LINK_JOBS=2
+
+    - name: "LLVM: Build"
+      run: cd llvm/build && ninja || true
+
+    - name: "index-import: CMake"
+      run: mkdir build && cmake -B build -G Ninja -DClang_DIR=./llvm/build/lib/cmake/clang/ -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+
+    - name: "index-import: Build"
+      run: cd build && ninja
+
+  # For local development, use the playground at
+  # https://rhysd.github.io/actionlint/
+  actionlint:
+    name: Actionlint
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: raven-actions/actionlint@v2
+        with:
+          shellcheck: false

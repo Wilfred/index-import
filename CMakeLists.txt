@@ -34,6 +34,8 @@ endif()
 
 find_package(Clang CONFIG REQUIRED)
 
+find_package(dispatch)
+
 function(add_index_executable execname)
   add_executable("${execname}" "${execname}.cpp")
   target_include_directories("${execname}" SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS} ${CLANG_INCLUDE_DIRS})
